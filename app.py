@@ -1,8 +1,11 @@
 # app.py
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
-import os
+from fastapi.responses import JSONResponse
 from inference import generate_overlay
+
+from io import BytesIO
+from PIL import Image
+import base64
 
 app = FastAPI()
 
@@ -12,24 +15,26 @@ async def root():
 
 @app.post("/api/generateImageMask")
 async def generate_image_mask(file: UploadFile = File(...)):
-    # Salvar a imagem recebida
-    upload_dir = "uploads"
-    os.makedirs(upload_dir, exist_ok=True)
+    # Ler bytes da imagem enviada
+    image_bytes = await file.read()
+    
+    # Abrir imagem em memória
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    image_path = os.path.join(upload_dir, file.filename)
-    with open(image_path, "wb") as f:
-        f.write(await file.read())
+    # Rodar inferência (deve retornar mask e overlay em memória)
+    mask_img, overlay_img, stats = generate_overlay(image)
 
-    # Rodar inferência
-    mask_path, overlay_path, stats = generate_overlay(image_path)
+    # Converter imagens para base64
+    def img_to_base64(img):
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode()
 
-    # Retornar resultados
+    mask_b64 = img_to_base64(mask_img)
+    overlay_b64 = img_to_base64(overlay_img)
+
     return JSONResponse({
-        "mask_url": f"/{mask_path}",
-        "overlay_url": f"/{overlay_path}",
+        "mask_base64": mask_b64,
+        "overlay_base64": overlay_b64,
         "class_stats": stats
     })
-
-# Para servir arquivos estáticos
-from fastapi.staticfiles import StaticFiles
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
